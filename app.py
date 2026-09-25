@@ -1,36 +1,93 @@
+import os
+import json
 from flask import Flask, request
-import requests, os, json
+import requests
 
 app = Flask(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID   = os.environ.get("CHAT_ID")
 
+
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"})
 
+
+def fmt(v, dash="—"):
+    return dash if v is None or v == "" else v
+
+
+def msg_volob_alt(d):
+    side = str(d.get("side", "")).upper()
+    icon = "🟢" if side == "BUY" else "🔴"
+    n    = d.get("retracement")
+    return (
+        f"{icon} <b>{fmt(side)}</b>  ·  retracement #{fmt(n)}\n"
+        f"{fmt(d.get('sym'))}  |  TF: {fmt(d.get('tf'))}\n"
+        f"Price: {fmt(d.get('price'))}\n"
+        f"Zone: {fmt(d.get('zone_bot'))} – {fmt(d.get('zone_top'))}  ({fmt(d.get('zone_pct'))}%)\n"
+        f"Distance: {fmt(d.get('distance'))}"
+    )
+
+
+def msg_volob(d):
+    side  = str(d.get("side", ""))
+    icon  = "🟢" if side == "demand" else "🔴"
+    event = d.get("event")
+    head  = "new zone" if event == "new_ob" else "zone touched"
+    out = [
+        f"{icon} <b>{side.upper()}</b>  ·  {head}",
+        f"{fmt(d.get('sym'))}  |  TF: {fmt(d.get('tf'))}",
+    ]
+    if d.get("price") is not None:
+        out.append(f"Price: {fmt(d.get('price'))}")
+    if d.get("bot") is not None:
+        out.append(f"Zone: {fmt(d.get('bot'))} – {fmt(d.get('top'))}")
+    if d.get("vol") is not None:
+        out.append(f"Volume: {fmt(d.get('vol'))}")
+    if d.get("pct") is not None:
+        out.append(f"Share: {fmt(d.get('pct'))}%")
+    return "\n".join(out)
+
+
+def msg_legacy(d):
+    dir_ = d.get("dir")
+    emoji = "🟢" if dir_ == "GREEN" else "🔴" if dir_ == "RED" else "⚪"
+    return (
+        f"{emoji} <b>{fmt(dir_, '')} {fmt(d.get('pattern'), '')}</b>\n"
+        f"Symbol: {fmt(d.get('symbol'), '')}  |  TF: {fmt(d.get('tf'), '')}\n"
+        f"Price: {fmt(d.get('price'), '')}\n"
+        f"Zone: {fmt(d.get('low'), '')} - {fmt(d.get('high'), '')}\n"
+        f"Score: {fmt(d.get('score'), '')}/100"
+    )
+
+
 @app.route("/")
 def home():
     return "Relay is running", 200
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     raw = request.get_data(as_text=True)
     try:
         d = json.loads(raw)
-        emoji = "🟢" if d.get("dir") == "GREEN" else "🔴" if d.get("dir") == "RED" else "⚪"
-        msg = (
-            f"{emoji} <b>{d.get('dir','')} {d.get('pattern','')}</b>\n"
-            f"Symbol: {d.get('symbol','')}  |  TF: {d.get('tf','')}\n"
-            f"Price: {d.get('price','')}\n"
-            f"Zone: {d.get('low','')} - {d.get('high','')}\n"
-            f"Score: {d.get('score','')}/100"
-        )
+        src = d.get("src")
+        if src == "VolOBW16ALT":
+            msg = msg_volob_alt(d)
+        elif src in ("VolOBW16", "RevZonesW16", "AbsRevW16", "DeltaLadderW16"):
+            msg = msg_volob(d)
+        elif "dir" in d:
+            msg = msg_legacy(d)
+        else:
+            msg = "<pre>" + json.dumps(d, indent=2) + "</pre>"
     except Exception:
         msg = raw
+
     send_telegram(msg)
     return "ok", 200
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
