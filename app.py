@@ -1,7 +1,6 @@
 import os
 import json
 from flask import Flask, request
-import requests
 
 app = Flask(__name__)
 
@@ -11,26 +10,40 @@ CHAT_ID   = os.environ.get("CHAT_ID")
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    import requests
     requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"})
 
 
 def fmt(v, dash="—"):
+    """Telegram-safe value: never print None or an empty field."""
     return dash if v is None or v == "" else v
 
 
+# ---------------------------------------------------------------
+# VOL OB by Zonetraders W16 ALT — retracement alerts
+# ---------------------------------------------------------------
 def msg_volob_alt(d):
-    side = str(d.get("side", "")).upper()
-    icon = "🟢" if side == "BUY" else "🔴"
-    n    = d.get("retracement")
-    return (
-        f"{icon} <b>{fmt(side)}</b>  ·  retracement #{fmt(n)}\n"
-        f"{fmt(d.get('sym'))}  |  TF: {fmt(d.get('tf'))}\n"
-        f"Price: {fmt(d.get('price'))}\n"
-        f"Zone: {fmt(d.get('zone_bot'))} – {fmt(d.get('zone_top'))}  ({fmt(d.get('zone_pct'))}%)\n"
-        f"Distance: {fmt(d.get('distance'))}"
-    )
+    side    = str(d.get("side", "")).upper()
+    icon    = "🟢" if side == "BUY" else "🔴"
+    n       = d.get("retracement")
+    is_touch = d.get("mode") == "touch"
+    label   = "AT ZONE" if is_touch else "APPROACHING"
+
+    out = [
+        f"{icon} <b>{fmt(side)} · {label}</b>  ·  retracement #{fmt(n)}",
+        f"{fmt(d.get('sym'))}  |  TF: {fmt(d.get('tf'))}",
+        f"Price: {fmt(d.get('price'))}",
+        f"Zone: {fmt(d.get('zone_bot'))} – {fmt(d.get('zone_top'))}  ({fmt(d.get('zone_pct'))}%)",
+    ]
+    # distance only means something before price arrives
+    if not is_touch:
+        out.append(f"Distance: {fmt(d.get('distance'))}")
+    return "\n".join(out)
 
 
+# ---------------------------------------------------------------
+# VOL OB — new zone / zone touch alerts
+# ---------------------------------------------------------------
 def msg_volob(d):
     side  = str(d.get("side", ""))
     icon  = "🟢" if side == "demand" else "🔴"
@@ -51,6 +64,9 @@ def msg_volob(d):
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------
+# Original format — dir / pattern / symbol / tf / price / low / high / score
+# ---------------------------------------------------------------
 def msg_legacy(d):
     dir_ = d.get("dir")
     emoji = "🟢" if dir_ == "GREEN" else "🔴" if dir_ == "RED" else "⚪"
@@ -74,6 +90,7 @@ def webhook():
     try:
         d = json.loads(raw)
         src = d.get("src")
+        # route on src first, then fall back to the old shape
         if src == "VolOBW16ALT":
             msg = msg_volob_alt(d)
         elif src in ("VolOBW16", "RevZonesW16", "AbsRevW16", "DeltaLadderW16"):
@@ -81,8 +98,10 @@ def webhook():
         elif "dir" in d:
             msg = msg_legacy(d)
         else:
+            # unknown JSON — send it readable rather than as one long line
             msg = "<pre>" + json.dumps(d, indent=2) + "</pre>"
     except Exception:
+        # not JSON at all (plain-text alert) — pass it straight through
         msg = raw
 
     send_telegram(msg)
