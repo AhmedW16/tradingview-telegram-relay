@@ -7,11 +7,21 @@ app = Flask(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID   = os.environ.get("CHAT_ID")
 
+# RSI — separate bot (falls back to the main bot / chat if not set)
+RSI_BOT_TOKEN = os.environ.get("RSI_BOT_TOKEN") or BOT_TOKEN
+RSI_CHAT_ID   = os.environ.get("RSI_CHAT_ID") or CHAT_ID
+
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     import requests
     requests.post(url, json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"})
+
+
+def send_telegram_rsi(text):
+    url = f"https://api.telegram.org/bot{RSI_BOT_TOKEN}/sendMessage"
+    import requests
+    requests.post(url, json={"chat_id": RSI_CHAT_ID, "text": text}, timeout=10)
 
 
 def fmt(v, dash="—"):
@@ -105,6 +115,16 @@ def webhook():
         msg = raw
 
     send_telegram(msg)
+    return "ok", 200
+
+
+# ---------------------------------------------------------------
+# RSI By Zone Traders W16 — separate bot, plain text passed through
+# ---------------------------------------------------------------
+@app.route("/webhook-rsi", methods=["POST"])
+def webhook_rsi():
+    raw = request.get_data(as_text=True)
+    send_telegram_rsi(raw)
     return "ok", 200
 
 
