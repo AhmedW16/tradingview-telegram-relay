@@ -11,6 +11,10 @@ CHAT_ID   = os.environ.get("CHAT_ID")
 RSI_BOT_TOKEN = os.environ.get("RSI_BOT_TOKEN") or BOT_TOKEN
 RSI_CHAT_ID   = os.environ.get("RSI_CHAT_ID") or CHAT_ID
 
+# Candle Detector — separate bot (falls back to the main bot / chat if not set)
+CANDLE_BOT_TOKEN = os.environ.get("CANDLE_BOT_TOKEN") or BOT_TOKEN
+CANDLE_CHAT_ID   = os.environ.get("CANDLE_CHAT_ID") or CHAT_ID
+
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -22,6 +26,12 @@ def send_telegram_rsi(text):
     url = f"https://api.telegram.org/bot{RSI_BOT_TOKEN}/sendMessage"
     import requests
     requests.post(url, json={"chat_id": RSI_CHAT_ID, "text": text}, timeout=10)
+
+
+def send_telegram_candle(text):
+    url = f"https://api.telegram.org/bot{CANDLE_BOT_TOKEN}/sendMessage"
+    import requests
+    requests.post(url, json={"chat_id": CANDLE_CHAT_ID, "text": text}, timeout=10)
 
 
 def fmt(v, dash="—"):
@@ -89,6 +99,57 @@ def msg_legacy(d):
     )
 
 
+# ---------------------------------------------------------------
+# Candle Detector By Zone Traders W16 2.0 — JSON format
+# (only used when the indicator's "Alert format" = JSON;
+#  with "Text" the message is passed straight through)
+# ---------------------------------------------------------------
+def msg_candle(d):
+    ev     = str(d.get("event", "")).upper()
+    side   = str(d.get("side", "")).upper()
+    is_buy = side == "BUY"
+    candle = str(d.get("candle", "")).capitalize()
+
+    if ev == "NEW":   # normal mode (Structure Mode OFF)
+        icon = "🟢" if candle == "Green" else "🔴" if candle == "Red" else "⚪"
+        return "\n".join([
+            "🆕 NEW ZONE",
+            f"{icon} {fmt(d.get('pattern'))}",
+            f"📊 {fmt(d.get('symbol'))} · {fmt(d.get('tf'))}",
+            f"🎯 Zone: {fmt(d.get('bottom'))} – {fmt(d.get('top'))}",
+            f"⭐ Score: {fmt(d.get('score'))}/100",
+        ])
+
+    if ev in ("RETEST", "USED"):
+        head = "📍 ZONE TOUCHED"
+    elif ev == "HELD":
+        head = "📈 ZONE HELD" if is_buy else "📉 ZONE HELD"
+    elif ev == "INVALID":
+        head = "💥 ZONE BROKEN"
+    else:
+        head = "🆕 NEW ZONE"
+
+    if ev == "USED":
+        icon, ev_tx = "⚪", "USED (box closed)"
+    elif ev == "INVALID":
+        icon, ev_tx = "❌", "INVALID (box broken)"
+    else:
+        icon  = "🟢" if is_buy else "🔴"
+        ev_tx = "HELD ✅" if ev == "HELD" else ev
+
+    edge = "(box top)" if is_buy else "(box bottom)"
+    ct   = "⚠️ Counter Trend (CT)" if d.get("ct") else "✅ Normal"
+    return "\n".join([
+        head,
+        f"{icon} {side} · {ev_tx}",
+        f"📊 {fmt(d.get('symbol'))} · {fmt(d.get('tf'))}",
+        f"🕯 {fmt(d.get('pattern'))} · {candle} candle",
+        f"🎯 Level: {fmt(d.get('level'))} {edge}",
+        f"⭐ Score: {fmt(d.get('score'))}/100",
+        ct,
+    ])
+
+
 @app.route("/")
 def home():
     return "Relay is running", 200
@@ -125,6 +186,27 @@ def webhook():
 def webhook_rsi():
     raw = request.get_data(as_text=True)
     send_telegram_rsi(raw)
+    return "ok", 200
+
+
+# ---------------------------------------------------------------
+# Candle Detector By Zone Traders W16 2.0 — separate bot
+# Text format  -> passed straight through
+# JSON format  -> formatted by msg_candle (single event or array)
+# ---------------------------------------------------------------
+@app.route("/webhook-candle", methods=["POST"])
+def webhook_candle():
+    raw = request.get_data(as_text=True).strip()
+    if not raw:
+        return "empty", 400
+    try:
+        d = json.loads(raw)
+        items = d if isinstance(d, list) else [d]
+        for item in items:
+            send_telegram_candle(msg_candle(item))
+    except Exception:
+        # plain-text alert (Alert format = Text) — pass it straight through
+        send_telegram_candle(raw)
     return "ok", 200
 
 
