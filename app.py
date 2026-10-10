@@ -15,6 +15,10 @@ RSI_CHAT_ID   = os.environ.get("RSI_CHAT_ID") or CHAT_ID
 CANDLE_BOT_TOKEN = os.environ.get("CANDLE_BOT_TOKEN") or BOT_TOKEN
 CANDLE_CHAT_ID   = os.environ.get("CANDLE_CHAT_ID") or CHAT_ID
 
+# Vol OB Precision Telegram Alert — separate bot (falls back to the main bot / chat if not set)
+VOBTG_BOT_TOKEN = os.environ.get("VOBTG_BOT_TOKEN") or BOT_TOKEN
+VOBTG_CHAT_ID   = os.environ.get("VOBTG_CHAT_ID") or CHAT_ID
+
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -32,6 +36,12 @@ def send_telegram_candle(text):
     url = f"https://api.telegram.org/bot{CANDLE_BOT_TOKEN}/sendMessage"
     import requests
     requests.post(url, json={"chat_id": CANDLE_CHAT_ID, "text": text}, timeout=10)
+
+
+def send_telegram_vobtg(text):
+    url = f"https://api.telegram.org/bot{VOBTG_BOT_TOKEN}/sendMessage"
+    import requests
+    requests.post(url, json={"chat_id": VOBTG_CHAT_ID, "text": text}, timeout=10)
 
 
 def fmt(v, dash="—"):
@@ -207,6 +217,19 @@ def webhook_candle():
     except Exception:
         # plain-text alert (Alert format = Text) — pass it straight through
         send_telegram_candle(raw)
+    return "ok", 200
+
+
+# ---------------------------------------------------------------
+# Vol OB Precision Telegram Alert By Zone Traders W16 — separate bot
+# plain text passed straight through
+# ---------------------------------------------------------------
+@app.route("/webhook-volob-tg", methods=["POST"])
+def webhook_volob_tg():
+    raw = request.get_data(as_text=True).strip()
+    if not raw:
+        return "empty", 400
+    send_telegram_vobtg(raw)
     return "ok", 200
 
 
